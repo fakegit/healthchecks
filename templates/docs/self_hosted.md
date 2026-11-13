@@ -8,12 +8,11 @@ Healthchecks instance yourself.
 
 The building blocks are:
 
-* Python 3.6+
-* Django 3
+* Python 3.12+
+* Django 6.0
 * PostgreSQL or MySQL
 
 ## Setting Up for Development
-
 
 You can set up a development environment in a Python
 [virtual environment](https://docs.python.org/3/tutorial/venv.html)
@@ -68,44 +67,68 @@ The following instructions assume you are using a Debian-based OS.
 
 * From another shell, run the `sendalerts` management command, responsible for
   sending out notifications:
-
         $ ./manage.py sendalerts
 
 At this point, the site should now be running at `http://localhost:8000`.
 
 ## Accessing Administration Panel
 
-Healthchecks comes with Django's administration panel where you can manually
-view and modify user accounts, projects, checks, integrations etc. To access it,
-if you haven't already, create a superuser account:
+Healthchecks comes with Django's administration panel where you can perform
+administrative tasks: delete user accounts, change passwords, increase limits for
+specific users, inspect contents of database tables.
+
+To access the administration panel, if you haven't already, create a superuser account:
 
     $ ./manage.py createsuperuser
+
+This will trigger an interactive prompt.
+
+You can also provide credentials via parameters, bypassing the interactive prompt:
+
+    $ ./manage.py createsuperuser --email user@example.com --password changeme123
 
 Then, log into the site using the superuser credentials. Once logged in,
 click on the "Account" dropdown in top navigation, and select "Site Administration".
 
 ## Sending Emails
 
-Healthchecks needs SMTP credentials to be able to send emails:
-login links, monitoring notifications, monthly reports.
+Healthchecks must be able to send email messages, so it can send out login
+links and alerts to users. Specify your SMTP credentials using the following
+environment variables:
 
-Specify SMTP credentials using the `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`,
-`EMAIL_HOST_PASSWORD`, and `EMAIL_USE_TLS` environment variables. Example:
+- Implicit TLS (*recommended*):
 
-```ini
-EMAIL_HOST=my-smtp-server-here.com
-EMAIL_PORT=587
-EMAIL_HOST_USER=my-username
-EMAIL_HOST_PASSWORD=mypassword
+```python
+DEFAULT_FROM_EMAIL = "valid-sender-address@example.org"
+EMAIL_HOST = "smtp.example.org"
+EMAIL_PORT = 465
+EMAIL_HOST_USER = "example-username"
+EMAIL_HOST_PASSWORD = "example-password"
+EMAIL_USE_TLS = False
+EMAIL_USE_SSL = True
+```
+
+Port 465 should be the preferred method according to [RFC8314 Section 3.3: Implicit
+TLS for SMTP Submission](https://tools.ietf.org/html/rfc8314#section-3.3). Be sure
+to use a TLS certificate and not an SSL one.
+
+- Explicit TLS:
+
+```python
+DEFAULT_FROM_EMAIL = "valid-sender-address@example.org"
+EMAIL_HOST = "smtp.example.org"
+EMAIL_PORT = 587
+EMAIL_HOST_USER = "example-username"
+EMAIL_HOST_PASSWORD = "example-password"
 EMAIL_USE_TLS = True
 ```
 
-You can read more about handling outbound email in the Django documentation,
-[Sending Email](https://docs.djangoproject.com/en/3.1/topics/email/) section.
+Healthchecks use these environment variables to construct the `settings.MAILERS`
+dictionary (a standard Django setting, [docs](https://docs.djangoproject.com/en/6.1/ref/settings/#std-setting-MAILERS)).
 
 ## Receiving Emails
 
-Healthchecks comes with a `smtpd` management command, which starts up a
+Healthchecks comes with a `smtpd` management command, which starts up an
 SMTP listener service. With the command running, you can ping your
 checks by sending email messages.
 
@@ -135,26 +158,21 @@ Within an activated virtualenv, run the `sendalerts` command like so:
 In a production setup, make sure the `sendalerts` command can survive
 server restarts.
 
-## Database Cleanup
+## Database Cleanup {: #database-cleanup }
 
-With time and use the Healthchecks database will grow in size. You may
-decide to prune old data: inactive user accounts, old checks not assigned
-to users, old records of outgoing email messages and old records of received pings.
-There are separate Django management commands for each task:
+Healthchecks deletes old entries from `api_ping`, `api_flip`, and `api_notification`
+tables automatically. By default, Healthchecks keeps the 100 most recent
+pings for every check. You can set the limit higher to keep a longer history:
+go to the Administration Panel, look up user's **Profile** and modify its
+"Ping log limit" field.
 
-Remove old records from the `api_ping` table. For each check, keep 100 most
-recent pings:
+Healthchecks provides management commands for cleaning up
+`auth_user` (user accounts) and `api_tokenbucket` (rate limiting records) tables,
+and for removing stale objects from external object storage.
 
-    $ ./manage.py prunepings
+Remove user accounts that are older than 1 month and have never logged in:
 
-Remove old records of sent notifications. For each check, remove notifications that
-are older than the oldest stored ping for the corresponding check.
-
-    $ ./manage.py prunenotifications
-
-Remove inactive user accounts:
-
-```bash
+```sh
 $ ./manage.py pruneusers
 ```
 
@@ -162,17 +180,25 @@ Remove old records from the `api_tokenbucket` table. The TokenBucket
 model is used for rate-limiting login attempts and similar operations.
 Any records older than one day can be safely removed.
 
-    $ ./manage.py prunetokenbucket
+```sh
+$ ./manage.py prunetokenbucket
+```
 
-Remove old records from the `api_flip` table. The Flip objects are used to track
-status changes of checks, and to calculate downtime statistics month by month.
-Flip objects from more than 3 months ago are not used and can be safely removed.
+Remove old objects from external object storage. When an user removes
+a check, removes a project, or closes their account, Healthchecks
+does not remove the associated objects from the external object
+storage on the fly. Instead, you should run `pruneobjects` occasionally
+(for example, once a month). This command first takes an inventory
+of all checks in the database, and then iterates over top-level
+keys in the object storage bucket, and deletes any that don't also
+exist in the database.
 
-    $ ./manage.py pruneflips
+```sh
+$ ./manage.py pruneobjects
+```
 
 When you first try these commands on your data, it is a good idea to
-test them on a copy of your database, and not on the live system.
-
+test them on a copy of your database, not on the live database right away.
 In a production setup, you will want to run these commands regularly, as well as
 have regular, automatic database backups set up.
 

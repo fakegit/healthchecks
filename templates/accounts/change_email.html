@@ -19,16 +19,7 @@
                     your {{ site_name }} account.
                 </p>
 
-                {% if request.user.has_usable_password %}
-                <p class="alert alert-warning">
-                    <strong>Your password will be reset.</strong>
-                    For security purposes, after updating your email address,
-                    {% site_name %} will also reset your current password
-                    and log you out.
-                </p>
-                {% endif %}
-
-                {% if request.user.credentials.exists %}
+                {% if request.user.credentials.exists or request.profile.totp %}
                 <p class="alert alert-warning">
                     <strong>Two-factor authentication is active.</strong>
                     If you are handing this account over to somebody else,

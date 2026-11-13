@@ -15,18 +15,8 @@
     color: #5cb85c;
 }
 
-#close-account, #remove-project {
-    margin-left: 24px;
-    border-color: #d43f3a;
-    color: #d43f3a;
-}
-
-#close-account:hover, #remove-project:hover {
-    background-color: #ffebea;
-}
-
 .invite-suggestion {
-    color: #888;
+    color: var(--text-muted);
 }
 
 #suggestions-row td {

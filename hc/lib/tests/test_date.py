@@ -1,15 +1,30 @@
-from datetime import datetime as dt, timedelta as td
-from django.test import TestCase
+from __future__ import annotations
 
-from hc.lib.date import format_hms, choose_next_report_date
+from datetime import date, datetime, timezone
+from datetime import timedelta as td
+from unittest import TestCase
+
+import time_machine
+
+from hc.lib.date import (
+    day_boundaries,
+    format_approx_duration,
+    format_duration_for_sentence,
+    format_hms,
+    month_boundaries,
+    seconds_in_month,
+    week_boundaries,
+)
+
+CURRENT_TIME = datetime(2020, 1, 15, tzinfo=timezone.utc)
 
 
 class DateFormattingTestCase(TestCase):
-    def test_sub_second_works(self):
+    def test_sub_second_works(self) -> None:
         s = format_hms(td(seconds=0.12))
         self.assertEqual(s, "0.12 sec")
 
-    def test_mins_secs_work(self):
+    def test_mins_secs_work(self) -> None:
         s = format_hms(td(seconds=0))
         self.assertEqual(s, "0 sec")
 
@@ -22,7 +37,7 @@ class DateFormattingTestCase(TestCase):
         s = format_hms(td(seconds=62))
         self.assertEqual(s, "1 min 2 sec")
 
-    def test_hours_work(self):
+    def test_hours_work(self) -> None:
         s = format_hms(td(seconds=62 + 60 * 60))
         self.assertEqual(s, "1 h 1 min 2 sec")
 
@@ -30,20 +45,99 @@ class DateFormattingTestCase(TestCase):
         self.assertEqual(s, "1 h 0 min 0 sec")
 
 
-class NextReportDateTestCase(TestCase):
-    def test_it_works(self):
-        # October
-        nao = dt(year=2019, month=10, day=15, hour=6)
-        result = choose_next_report_date(nao)
-        self.assertEqual(result.year, 2019)
-        self.assertEqual(result.month, 11)
-        self.assertEqual(result.day, 1)
-        self.assertTrue(result.hour >= 12)
+class ApproxFormattingTestCase(TestCase):
+    def test_days_work(self) -> None:
+        s = format_approx_duration(td(days=3, hours=6, minutes=12, seconds=24))
+        self.assertEqual(s, "3 days 6 h")
 
-        # December
-        nao = dt(year=2019, month=12, day=15, hour=6)
-        result = choose_next_report_date(nao)
-        self.assertEqual(result.year, 2020)
-        self.assertEqual(result.month, 1)
-        self.assertEqual(result.day, 1)
-        self.assertTrue(result.hour >= 12)
+    def test_one_day_works(self) -> None:
+        s = format_approx_duration(td(days=1, hours=6, minutes=12, seconds=24))
+        self.assertEqual(s, "1 day 6 h")
+
+    def test_hours_work(self) -> None:
+        s = format_approx_duration(td(hours=6, minutes=12, seconds=24))
+        self.assertEqual(s, "6 h 12 min")
+
+    def test_minutes_work(self) -> None:
+        s = format_approx_duration(td(minutes=12, seconds=24))
+        self.assertEqual(s, "12 min 24 sec")
+
+
+class ForSentenceFormattingTestCase(TestCase):
+    def test_it_works(self) -> None:
+        samples = [
+            (td(days=3, hours=6, minutes=12, seconds=24), "3 days, 6 hours"),
+            (td(days=1, hours=6, minutes=12, seconds=24), "1 day, 6 hours"),
+            (td(days=3, hours=1, minutes=12, seconds=24), "3 days, 1 hour"),
+            (td(hours=6, minutes=12, seconds=24), "6 hours, 12 minutes"),
+            (td(hours=1, minutes=12, seconds=24), "1 hour, 12 minutes"),
+            (td(hours=6, minutes=1, seconds=24), "6 hours, 1 minute"),
+            (td(minutes=12, seconds=24), "12 minutes, 24 seconds"),
+            (td(minutes=1, seconds=24), "1 minute, 24 seconds"),
+            (td(minutes=12, seconds=1), "12 minutes, 1 second"),
+            (td(seconds=12), "12 seconds"),
+            (td(seconds=1), "1 second"),
+            (td(milliseconds=500), "0 seconds"),
+        ]
+
+        for duration, expected in samples:
+            self.assertEqual(format_duration_for_sentence(duration), expected)
+
+
+@time_machine.travel(CURRENT_TIME)
+class MonthBoundaryTestCase(TestCase):
+    def test_utc_works(self) -> None:
+        result = month_boundaries(3, "UTC")
+        self.assertEqual(result[0].isoformat(), "2020-01-01T00:00:00+00:00")
+        self.assertEqual(result[1].isoformat(), "2019-12-01T00:00:00+00:00")
+        self.assertEqual(result[2].isoformat(), "2019-11-01T00:00:00+00:00")
+
+    def test_non_utc_works(self) -> None:
+        result = month_boundaries(3, "Europe/Riga")
+        self.assertEqual(result[0].isoformat(), "2020-01-01T00:00:00+02:00")
+        self.assertEqual(result[1].isoformat(), "2019-12-01T00:00:00+02:00")
+        self.assertEqual(result[2].isoformat(), "2019-11-01T00:00:00+02:00")
+
+
+@time_machine.travel(CURRENT_TIME)
+class WeekBoundaryTestCase(TestCase):
+    def test_utc_works(self) -> None:
+        result = week_boundaries(3, "UTC")
+        self.assertEqual(result[0].isoformat(), "2020-01-13T00:00:00+00:00")
+        self.assertEqual(result[1].isoformat(), "2020-01-06T00:00:00+00:00")
+        self.assertEqual(result[2].isoformat(), "2019-12-30T00:00:00+00:00")
+
+    def test_non_utc_works(self) -> None:
+        result = week_boundaries(3, "Europe/Riga")
+        self.assertEqual(result[0].isoformat(), "2020-01-13T00:00:00+02:00")
+        self.assertEqual(result[1].isoformat(), "2020-01-06T00:00:00+02:00")
+        self.assertEqual(result[2].isoformat(), "2019-12-30T00:00:00+02:00")
+
+
+@time_machine.travel(CURRENT_TIME)
+class DayBoundaryTestCase(TestCase):
+    def test_utc_works(self) -> None:
+        result = day_boundaries(3, "UTC")
+        self.assertEqual(result[0].isoformat(), "2020-01-15T00:00:00+00:00")
+        self.assertEqual(result[1].isoformat(), "2020-01-14T00:00:00+00:00")
+        self.assertEqual(result[2].isoformat(), "2020-01-13T00:00:00+00:00")
+
+    def test_non_utc_works(self) -> None:
+        result = day_boundaries(3, "Europe/Riga")
+        self.assertEqual(result[0].isoformat(), "2020-01-15T00:00:00+02:00")
+        self.assertEqual(result[1].isoformat(), "2020-01-14T00:00:00+02:00")
+        self.assertEqual(result[2].isoformat(), "2020-01-13T00:00:00+02:00")
+
+
+class SecondsInMonthTestCase(TestCase):
+    def test_utc_works(self) -> None:
+        result = seconds_in_month(date(2023, 10, 1), "UTC")
+        self.assertEqual(result, 31 * 24 * 60 * 60)
+
+    def test_it_handles_dst_extra_hour(self) -> None:
+        result = seconds_in_month(date(2023, 10, 1), "Europe/Riga")
+        self.assertEqual(result, 31 * 24 * 60 * 60 + 60 * 60)
+
+    def test_it_handles_dst_skipped_hour(self) -> None:
+        result = seconds_in_month(date(2024, 3, 1), "Europe/Riga")
+        self.assertEqual(result, 31 * 24 * 60 * 60 - 60 * 60)

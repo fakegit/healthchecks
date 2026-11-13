@@ -11,9 +11,28 @@ $(function() {
     });
 
     var $cm = $("#checks-modal");
-    $cm.on("click", "#toggle-all", function() {
-        var value = $(this).prop("checked");
-        $cm.find(".toggle").prop("checked", value);
+    function updateNumAssigned() {
+        var numAssigned = $cm.find("input:checkbox:checked").length;
+        var numTotal = $cm.find("input:checkbox").length;
+        $cm.find("#num-assigned").text(numAssigned);
+        $cm.find("#select-all").attr("disabled", numAssigned == numTotal);
+        $cm.find("#unselect-all").attr("disabled", numAssigned == 0);
+    }
+    $cm.on("click", "#select-all", function() {
+        $cm.find("input[type='checkbox']").prop("checked", true);
+        updateNumAssigned();
+    });
+    $cm.on("click", "#unselect-all", function() {
+        $cm.find("input[type='checkbox']").prop("checked", false);
+        updateNumAssigned();
+    });
+    // When any checkbox changes its value, update the "(x of y)"" in the title
+    $cm.on("change", "input", updateNumAssigned);
+    // Let the user to click anywhere in the row to toggle the checkbox
+    $cm.on("click", "tr", function(ev) {
+        if (event.target.type !== 'checkbox') {
+            $(":checkbox", this).trigger('click');
+        }
     });
 
     $(".channel-remove").click(function() {

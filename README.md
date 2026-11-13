@@ -1,18 +1,7 @@
 # Healthchecks
 
-![Build Status](https://github.com/healthchecks/healthchecks/workflows/Django%20CI/badge.svg)
+[![Tests](https://github.com/healthchecks/healthchecks/actions/workflows/tests.yml/badge.svg)](https://github.com/healthchecks/healthchecks/actions/workflows/tests.yml)
 [![Coverage Status](https://coveralls.io/repos/healthchecks/healthchecks/badge.svg?branch=master&service=github)](https://coveralls.io/github/healthchecks/healthchecks?branch=master)
-
-
-![Screenshot of Welcome page](/static/img/welcome.png?raw=true "Welcome Page")
-
-![Screenshot of My Checks page](/static/img/my_checks.png?raw=true "My Checks Page")
-
-![Screenshot of Period/Grace dialog](/static/img/period_grace.png?raw=true "Period/Grace Dialog")
-
-![Screenshot of Cron dialog](/static/img/cron.png?raw=true "Cron Dialog")
-
-![Screenshot of Integrations page](/static/img/channels.png?raw=true "Integrations Page")
 
 Healthchecks is a cron job monitoring service. It listens for HTTP requests
 and email messages ("pings") from your cron jobs and scheduled tasks ("checks").
@@ -24,65 +13,124 @@ team management features: projects, team members, read-only access.
 
 The building blocks are:
 
-* Python 3.6+
-* Django 3
-* PostgreSQL or MySQL
+* Python 3.12+
+* Django 6.1
+* PostgreSQL, MySQL or MariaDB
 
 Healthchecks is licensed under the BSD 3-clause license.
 
 Healthchecks is available as a hosted service
 at [https://healthchecks.io/](https://healthchecks.io/).
 
+A [Dockerfile](https://github.com/healthchecks/healthchecks/tree/master/docker)
+and [pre-built Docker images](https://hub.docker.com/r/healthchecks/healthchecks) are
+available.
+
+Screenshots:
+
+The "My Checks" screen. Shows the status of all your cron jobs
+in a live-updating dashboard.
+
+![Screenshot of My Checks page](/static/img/my_checks.png?raw=true "My Checks Page")
+
+Each check has configurable Period and Grace Time parameters. Period is the expected
+time between pings. Grace Time specifies how long to wait before sending out alerts
+when a job is running late.
+
+![Screenshot of Period/Grace dialog](/static/img/period_grace.png?raw=true "Period/Grace Dialog")
+
+Alternatively, you can define the expected schedules using a cron expressions.
+Healthchecks uses the [cronsim](https://github.com/cuu508/cronsim) library to
+parse and evaluate cron expressions.
+
+![Screenshot of Cron dialog](/static/img/cron.png?raw=true "Cron Dialog")
+
+Check details page, with a live-updating event log.
+
+![Screenshot of Check Details page](/static/img/check_details.png?raw=true "Check Details Page")
+
+Healthchecks provides status badges with public but hard-to-guess URLs.
+You can use them in your READMEs, dashboards, or status pages.
+
+![Screenshot of Badges page](/static/img/badges.png?raw=true "Status Badges")
+
+
 ## Setting Up for Development
+
+If you are planning to developing Healthchecks, please read
+[CONTRIBUTING.md](https://github.com/healthchecks/healthchecks/tree/master/CONTRIBUTING.md).
 
 To set up Healthchecks development environment:
 
 * Install dependencies (Debian/Ubuntu):
 
-        $ sudo apt-get update
-        $ sudo apt-get install -y gcc python3-dev python3-venv libpq-dev
+  ```sh
+  sudo apt update
+  sudo apt install -y python3-venv
+  ```
 
 * Prepare directory for project code and virtualenv. Feel free to use a
   different location:
 
-        $ mkdir -p ~/webapps
-        $ cd ~/webapps
+  ```sh
+  mkdir -p ~/webapps
+  cd ~/webapps
+  ```
 
 * Prepare virtual environment
   (with virtualenv you get pip, we'll use it soon to install requirements):
 
-        $ python3 -m venv hc-venv
-        $ source hc-venv/bin/activate
-        $ pip3 install wheel # make sure wheel is installed in the venv
+  ```sh
+  python3 -m venv .venv
+  source .venv/bin/activate
+  ```
 
 * Check out project code:
 
-        $ git clone https://github.com/healthchecks/healthchecks.git
+  ```sh
+  git clone https://github.com/healthchecks/healthchecks.git
+  ```
 
 * Install requirements (Django, ...) into virtualenv:
 
-        $ pip install -r healthchecks/requirements.txt
+  ```sh
+  pip install -r healthchecks/requirements.txt -r healthchecks/requirements-dev.txt
+  ```
 
+* macOS only - pycurl needs to be reinstalled using the following method (assumes OpenSSL was installed using brew):
+
+  ```sh
+  export PYCURL_VERSION=`cat requirements.txt | grep pycurl | cut -d '=' -f3`
+  export OPENSSL_LOCATION=`brew --prefix openssl`
+  export PYCURL_SSL_LIBRARY=openssl
+  export LDFLAGS=-L$OPENSSL_LOCATION/lib
+  export CPPFLAGS=-I$OPENSSL_LOCATION/include
+  pip uninstall -y pycurl
+  pip install pycurl==$PYCURL_VERSION --compile --no-cache-dir
+  ```
 
 * Create database tables and a superuser account:
 
-        $ cd ~/webapps/healthchecks
-        $ ./manage.py migrate
-        $ ./manage.py createsuperuser
+  ```sh
+  cd ~/webapps/healthchecks
+  ./manage.py migrate
+  ./manage.py createsuperuser
+  ```
 
   With the default configuration, Healthchecks stores data in a SQLite file
   `hc.sqlite` in the checkout directory (`~/webapps/healthchecks`).
 
-  To use PostgreSQL or MySQL, see the section **Database Configuration** section
-  below.
-
 * Run tests:
 
-        $ ./manage.py test
+  ```sh
+  ./manage.py test
+  ```
 
 * Run development server:
 
-        $ ./manage.py runserver
+  ```sh
+  ./manage.py runserver
+  ```
 
 The site should now be running at `http://localhost:8000`.
 To access Django administration site, log in as a superuser, then
@@ -90,14 +138,25 @@ visit `http://localhost:8000/admin/`
 
 ## Configuration
 
-Healthchecks reads configuration from environment variables.
+Healthchecks reads configuration from environment variables. See the
+[full list of configuration parameters](https://healthchecks.io/docs/self_hosted_configuration/)
+you can set via environment variables.
 
-[Full list of configuration parameters](https://healthchecks.io/docs/self_hosted_configuration/).
+In addition, Healthchecks reads settings from the `hc/local_settings.py` file if it
+exists. You can set or override any [standard Django setting](https://docs.djangoproject.com/en/6.1/ref/settings/)
+in this file. You can copy the provided `hc/local_settings.py.example` as
+`hc/local_settings.py` and use it as a starting point.
+
+If a setting is specified both as environment variable and in `hc/local_settings.py`,
+the latter takes precedence.
 
 ## Accessing Administration Panel
 
-Healthchecks comes with Django's administration panel where you can manually
-view and modify user accounts, projects, checks, integrations etc. To access it,
+Healthchecks comes with Django's administration panel where you can perform
+administrative tasks: delete user accounts, change passwords, increase limits for
+specific users, inspect contents of database tables.
+
+To access the administration panel,
 
  * if you haven't already, create a superuser account: `./manage.py createsuperuser`
  * log into the site using superuser credentials
@@ -110,16 +169,33 @@ Healthchecks must be able to send email messages, so it can send out login
 links and alerts to users. Specify your SMTP credentials using the following
 environment variables:
 
-```python
-EMAIL_HOST = "your-smtp-server-here.com"
-EMAIL_PORT = 587
-EMAIL_HOST_USER = "smtp-username"
-EMAIL_HOST_PASSWORD = "smtp-password"
-EMAIL_USE_TLS = True
-```
+- Implicit TLS (*recommended*):
+    ```python
+    DEFAULT_FROM_EMAIL = "valid-sender-address@example.org"
+    EMAIL_HOST = "smtp.example.org"
+    EMAIL_PORT = 465
+    EMAIL_HOST_USER = "example-username"
+    EMAIL_HOST_PASSWORD = "example-password"
+    EMAIL_USE_TLS = False
+    EMAIL_USE_SSL = True
+    ```
 
-For more information, have a look at Django documentation,
-[Sending Email](https://docs.djangoproject.com/en/1.10/topics/email/) section.
+    Port 465 should be the preferred method according to [RFC8314 Section 3.3: Implicit
+    TLS for SMTP Submission](https://tools.ietf.org/html/rfc8314#section-3.3). Be sure
+    to use a TLS certificate and not an SSL one.
+
+- Explicit TLS:
+    ```python
+    DEFAULT_FROM_EMAIL = "valid-sender-address@example.org"
+    EMAIL_HOST = "smtp.example.org"
+    EMAIL_PORT = 587
+    EMAIL_HOST_USER = "example-username"
+    EMAIL_HOST_PASSWORD = "example-password"
+    EMAIL_USE_TLS = True
+    ```
+
+Healthchecks use these environment variables to construct the `settings.MAILERS`
+dictionary (a standard Django setting, [docs](https://docs.djangoproject.com/en/6.1/ref/settings/#std-setting-MAILERS)).
 
 ## Receiving Emails
 
@@ -130,77 +206,87 @@ to `your-uuid-here@my-monitoring-project.com` email addresses.
 
 Start the SMTP listener on port 2525:
 
-    $ ./manage.py smtpd --port 2525
+```sh
+./manage.py smtpd --port 2525
+```
 
 Send a test email:
 
-    $ curl --url 'smtp://127.0.0.1:2525' \
-        --mail-from 'foo@example.org' \
-        --mail-rcpt '11111111-1111-1111-1111-111111111111@my-monitoring-project.com' \
-        -F '='
+```sh
+curl --url 'smtp://127.0.0.1:2525' \
+    --mail-from 'foo@example.org' \
+    --mail-rcpt '11111111-1111-1111-1111-111111111111@my-monitoring-project.com' \
+    -F '='
+```
 
+## Sending Alerts and Reports
 
-
-## Sending Status Notifications
-
-healtchecks comes with a `sendalerts` management command, which continuously
+Healthchecks comes with a `sendalerts` management command, which continuously
 polls database for any checks changing state, and sends out notifications as
 needed. Within an activated virtualenv, you can manually run
 the `sendalerts` command like so:
 
-    $ ./manage.py sendalerts
+```sh
+./manage.py sendalerts
+```
 
 In a production setup, you will want to run this command from a process
-manager like [supervisor](http://supervisord.org/) or systemd.
+manager like systemd or [supervisor](http://supervisord.org/).
+
+Healthchecks also comes with a `sendreports` management command which
+sends out monthly reports, weekly reports, and the daily or hourly reminders.
+
+Run `sendreports` without arguments to run any due reports and reminders
+and then exit:
+
+```sh
+./manage.py sendreports
+```
+
+Run it with the `--loop` argument to make it run continuously:
+
+```sh
+./manage.py sendreports --loop
+```
 
 ## Database Cleanup
 
-With time and use the Healthchecks database will grow in size. You may
-decide to prune old data: inactive user accounts, old checks not assigned
-to users, records of outgoing email messages and records of received pings.
-There are separate Django management commands for each task:
+Healthchecks deletes old entries from `api_ping`, `api_flip`, and `api_notification`
+tables automatically. By default, Healthchecks keeps the 100 most recent
+pings for every check. You can set the limit higher to keep a longer history:
+go to the Administration Panel, look up user's **Profile** and modify its
+"Ping log limit" field.
 
-* Remove old records from `api_ping` table. For each check, keep 100 most
-  recent pings:
+Healthchecks also provides management commands for cleaning up
+`auth_user` (user accounts) and `api_tokenbucket` (rate limiting records) tables,
+and for removing stale objects from external object storage.
 
-    ```
-    $ ./manage.py prunepings
-    ```
+* Remove user accounts that are older than 1 month and have never logged in:
 
-* Remove old records of sent notifications. For each check, remove
-  notifications that are older than the oldest stored ping for same check.
-
-    ```
-    $ ./manage.py prunenotifications
-    ```
-
-* Remove user accounts that match either of these conditions:
-  * Account was created more than 6 months ago, and user has never logged in.
-   These can happen when user enters invalid email address when signing up.
-  * Last login was more than 6 months ago, and the account has no checks.
-   Assume the user doesn't intend to use the account any more and would
-   probably *want* it removed.
-
-    ```
-    $ ./manage.py pruneusers
-    ```
+  ```sh
+  ./manage.py pruneusers
+  ```
 
 * Remove old records from the `api_tokenbucket` table. The TokenBucket
   model is used for rate-limiting login attempts and similar operations.
   Any records older than one day can be safely removed.
 
-    ```
-    $ ./manage.py prunetokenbucket
-    ```
+  ```sh
+  ./manage.py prunetokenbucket
+  ```
 
-* Remove old records from the `api_flip` table. The Flip
-  objects are used to track status changes of checks, and to calculate
-  downtime statistics month by month. Flip objects from more than 3 months
-  ago are not used and can be safely removed.
+* Remove old objects from external object storage. When an user removes
+  a check, removes a project, or closes their account, Healthchecks
+  does not remove the associated objects from the external object
+  storage on the fly. Instead, you should run `pruneobjects` occasionally
+  (for example, once a month). This command first takes an inventory
+  of all checks in the database, and then iterates over top-level
+  keys in the object storage bucket, and deletes any that don't also
+  exist in the database.
 
-    ```
-    $ ./manage.py pruneflips
-    ```
+  ```sh
+  ./manage.py pruneobjects
+  ```
 
 When you first try these commands on your data, it is a good idea to
 test them on a copy of your database, not on the live database right away.
@@ -215,16 +301,12 @@ setting to a non-null value. Set its value to your site's domain without scheme
 and without port. For example, if your site runs on `https://my-hc.example.org`,
 set `RP_ID` to `my-hc.example.org`.
 
-Note that WebAuthn requires HTTPS, even if running on localhost. To test WebAuthn
-locally with a self-signed certificate, you can use the `runsslserver` command
-from the `django-sslserver` package.
-
 ## External Authentication
 
 Healthchecks supports external authentication by means of HTTP headers set by
 reverse proxies or the WSGI server. This allows you to integrate it into your
 existing authentication system (e.g., LDAP or OAuth) via an authenticating proxy.
-When this option is enabled, **healtchecks will trust the header's value implicitly**,
+When this option is enabled, **healthchecks will trust the header's value implicitly**,
 so it is **very important** to ensure that attackers cannot set the value themselves
 (and thus impersonate any user). How to do this varies by your chosen proxy,
 but generally involves configuring it to strip out headers that normalize to the
@@ -241,29 +323,92 @@ When `REMOTE_USER_HEADER` is set, Healthchecks will:
  - automatically create an user account if it does not exist
  - disable the default authentication methods (login link to email, password)
 
+The header name in `REMOTE_USER_HEADER` must be specified in upper-case,
+with any dashes replaced with underscores, and prefixed with `HTTP_`. For
+example, if your authentication proxy sets a `X-Authenticated-User` request
+header, you should set `REMOTE_USER_HEADER=HTTP_X_AUTHENTICATED_USER`.
+
+**Note on using `local_settings.py`:**
+When Healthchecks reads settings from environment variables and encounters
+the `REMOTE_USER_HEADER` environment variable, it sets *two* settings,
+`REMOTE_USER_HEADER` and `AUTHENTICATION_BACKENDS`. This logic has already run by the
+time Healthchecks reads `local_settings.py`. Therefore, if you configure Healthchecks
+using the `local_settings.py` file instead of environment variables, and specify
+`REMOTE_USER_HEADER` there, you will also need a line which sets the other setting,
+`AUTHENTICATION_BACKENDS`:
+
+```
+REMOTE_USER_HEADER = "HTTP_X_AUTHENTICATED_USER"
+AUTHENTICATION_BACKENDS = ["hc.accounts.backends.CustomHeaderBackend"]
+```
+
+## External Object Storage
+
+Healthchecks can optionally store large ping bodies in S3-compatible object
+storage. To enable this feature, you will need to:
+
+* ensure you have the [MinIO Python library](https://docs.min.io/docs/python-client-quickstart-guide.html) installed:
+
+  ```bash
+  pip install minio
+  ```
+* configure the credentials for accessing object storage: `S3_ACCESS_KEY`,
+  `S3_SECRET_KEY`, `S3_ENDPOINT`, `S3_REGION` and `S3_BUCKET`.
+
+Healthchecks will use external object storage for storing any request bodies that
+exceed 100 bytes. If the size of a request body is 100 bytes or below, Healthchecks
+will still store it in the database.
+
+Healthchecks automatically removes old stored ping bodies from object
+storage while uploading new data. However, Healthchecks does not automatically
+clean up data when you delete checks, projects or entire user accounts.
+Use the `pruneobjects` management command to remove data for checks that don't
+exist any more.
+
+When external object storage is not enabled (the credentials for accessing object
+storage are not set), Healthchecks stores all ping bodies in the database.
+If you enable external object storage, Healthchecks will still be able to
+access the ping bodies already stored in the database. You don't need to migrate
+them to the object storage. On the other hand, if you later decide to disable
+external object storage, Healthchecks will not have access to the externally
+stored ping bodies any more. And there is currently no script or management command
+for migrating ping bodies from external object storage back to the database.
+
 ## Integrations
 
 ### Slack
 
-To enable the Slack "self-service" integration, you will need to create a "Slack App".
+Healthchecks supports two Slack integration setup flows: legacy and app-based.
 
-To do so:
-* Create a _new Slack app_ on https://api.slack.com/apps/
-* Add at least _one scope_ in the permissions section to be able to deploy the app in your workspace (By example `incoming-webhook` for the `Bot Token Scopes`
-https://api.slack.com/apps/APP_ID/oauth?).
+The legacy flow does not require additional configuration and is used by default.
+In this flow the user creates an incoming webhook URL on the Slack side, and
+pastes the webhook URL in a form on the Healthchecks side.
+
+In the app-based flow the user clicks an "Add to Slack" button in Healthchecks,
+and gets transferred to a Slack-hosted dialog where they select the channel to
+post notifications to. This flow uses OAuth2 behind the scenes. To enable this
+flow, you will need to set up a Slack OAuth2 app:
+
+* Create a new Slack app on https://api.slack.com/apps/
+* Add at least one scope in the permissions section to be able to deploy the app in
+  your workspace (By example `incoming-webhook` for the `Bot Token Scopes`).
 * Add a _redirect url_ in the format `SITE_ROOT/integrations/add_slack_btn/`.
-  For example, if your SITE_ROOT is `https://my-hc.example.org` then the redirect URL would be
-  `https://my-hc.example.org/integrations/add_slack_btn/`.
-* Look up your Slack app for the Client ID and Client Secret at https://api.slack.com/apps/APP_ID/general? . Put them
+  For example, if your SITE_ROOT is `https://my-hc.example.org` then the redirect URL
+  would be `https://my-hc.example.org/integrations/add_slack_btn/`.
+* Look up your Slack app for the Client ID and Client Secret. Put them
   in `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` environment
-  variables.
+  variables. Once these variables are set, Healthchecks will switch from using
+  the legacy flow to using the app-based flow.
 
+The legacy and app-based flows only affect the user experience during the initial
+setup of Slack integrations. The contents of notifications posted to Slack are the same
+regardless of the setup flow used.
 
 ### Discord
 
 To enable Discord integration, you will need to:
 
-* register a new application on https://discordapp.com/developers/applications/me
+* register a new application on https://discord.com/developers/applications/me
 * add a redirect URI to your Discord application. The URI format is
   `SITE_ROOT/integrations/add_discord/`. For example, if you are running a
   development server on `localhost:8000` then the redirect URI would be
@@ -300,33 +445,43 @@ To enable the Pushover integration, you will need to:
 ### Signal
 
 Healthchecks uses [signal-cli](https://github.com/AsamK/signal-cli) to send Signal
-notifications. Healthcecks interacts with signal-cli over DBus.
+notifications. Healthcecks interacts with signal-cli over UNIX or TCP socket.
+Healthchecks requires signal-cli version 0.11.2 or later.
 
-To enable the Signal integration:
+To enable the Signal integration via UNIX socket:
 
-* Set up and configure signal-cli to listen on DBus system bus ([instructions](https://github.com/AsamK/signal-cli/wiki/DBus-service)).
-  Make sure you can send test messages from command line, using the `dbus-send`
-  example given in the signal-cli instructions.
-* Set the `SIGNAL_CLI_ENABLED` environment variable to `True`.
+* Set up and configure signal-cli to expose JSON RPC on an UNIX socket
+  ([instructions](https://github.com/AsamK/signal-cli/wiki/JSON-RPC-service)).
+  Example: `signal-cli -a +xxxxxx daemon --socket /tmp/signal-cli-socket`
+* Put the socket's location in the `SIGNAL_CLI_SOCKET` environment variable.
+
+To enable the Signal integration via TCP socket:
+
+* Set up and configure signal-cli to expose JSON RPC on a TCP socket.
+  Example: `signal-cli -a +xxxxxx daemon --tcp 127.0.0.1:7583`
+* Put the socket's hostname and port in the `SIGNAL_CLI_SOCKET` environment variable
+  using "hostname:port" syntax, example: `127.0.0.1:7583`.
 
 
 ### Telegram
 
 * Create a Telegram bot by talking to the
 [BotFather](https://core.telegram.org/bots#6-botfather). Set the bot's name,
-description, user picture, and add a "/start" command.
+description, user picture, and add a "/start" command. To avoid user confusion,
+please do not use the Healthchecks.io logo as your bot's user picture, use
+your own logo.
 * After creating the bot you will have the bot's name and token. Put them
 in `TELEGRAM_BOT_NAME` and `TELEGRAM_TOKEN` environment variables.
 * Run `settelegramwebhook` management command. This command tells Telegram
 where to forward channel messages by invoking Telegram's
 [setWebhook](https://core.telegram.org/bots/api#setwebhook) API call:
 
-    ```
-    $ ./manage.py settelegramwebhook
+    ```sh
+    ./manage.py settelegramwebhook
     Done, Telegram's webhook set to: https://my-monitoring-project.com/integrations/telegram/bot/
     ```
 
-For this to work, your `SITE_ROOT` needs to be correct and use "https://"
+For this to work, your `SITE_ROOT` must be correct and must use the "https://"
 scheme.
 
 ### Apprise
@@ -334,9 +489,10 @@ scheme.
 To enable Apprise integration, you will need to:
 
 * ensure you have apprise installed in your local environment:
-```bash
-pip install apprise
-```
+
+  ```bash
+  pip install apprise
+  ```
 * enable the apprise functionality by setting the `APPRISE_ENABLED` environment variable.
 
 ### Shell Commands
@@ -366,38 +522,85 @@ MATRIX_USER_ID=@mychecks:matrix.org
 MATRIX_ACCESS_TOKEN=[a long string of characters returned by the login call]
 ```
 
+### PagerDuty Simple Install Flow
+
+To enable PagerDuty [Simple Install Flow](https://developer.pagerduty.com/docs/app-integration-development/events-integration/),
+
+* Register a PagerDuty app at [PagerDuty](https://pagerduty.com/) › Developer Mode › My Apps
+* In the newly created app, add the "Events Integration" functionality
+* Specify a Redirect URL: `https://your-domain.com/integrations/add_pagerduty/`
+* Copy the displayed app_id value (PXXXXX) and put it in the `PD_APP_ID` environment
+  variable
+
 ## Running in Production
 
-Here is a non-exhaustive list of pointers and things to check before launching a Healthchecks instance
-in production.
+Here is a non-exhaustive list of pointers and things to check before launching a
+Healthchecks instance in production.
 
 * Environment variables, settings.py and local_settings.py.
-  * [DEBUG](https://docs.djangoproject.com/en/2.2/ref/settings/#debug). Make sure it is set to `False`.
-  * [ALLOWED_HOSTS](https://docs.djangoproject.com/en/2.2/ref/settings/#allowed-hosts). Make sure it
-    contains the correct domain name you want to use.
-  * Server Errors. When DEBUG=False, Django will not show detailed error pages, and will not print exception
-    tracebacks to standard output. To receive exception tracebacks in email,
-    review and edit the [ADMINS](https://docs.djangoproject.com/en/2.2/ref/settings/#admins) and
-    [SERVER_EMAIL](https://docs.djangoproject.com/en/2.2/ref/settings/#server-email) settings.
-    Another good option for receiving exception tracebacks is to use [Sentry](https://sentry.io/for/django/).
-* Management commands that need to be run during each deployment.
-  * This project uses [Django Compressor](https://django-compressor.readthedocs.io/en/stable/)
-    to combine the CSS and JS files. It is configured for offline compression – run the
-    `manage.py compress` command whenever files in the `/static/` directory change.
-  * This project uses Django's [staticfiles app](https://docs.djangoproject.com/en/2.2/ref/contrib/staticfiles/).
-    Run the `manage.py collectstatic` command whenever files in the `/static/`
-    directory change. This command collects all the static files inside the `static-collected` directory.
-    Configure your web server to serve files from this directory under the `/static/` prefix.
-  * Database migration should be run after each update to make sure the database schemas are up to date. You can do that with `./manage.py migrate`.
+  * [DEBUG](https://docs.djangoproject.com/en/6.1/ref/settings/#debug). Make sure it is
+    set to `False`.
+  * [ALLOWED_HOSTS](https://docs.djangoproject.com/en/6.1/ref/settings/#allowed-hosts).
+    Make sure it contains the correct domain name you want to use.
+  * Server Errors. When DEBUG=False, Django will not show detailed error pages, and
+    will not print exception tracebacks to standard output. To receive exception
+    tracebacks in email, review and edit the
+    [ADMINS](https://docs.djangoproject.com/en/6.1/ref/settings/#admins) and
+    [SERVER_EMAIL](https://docs.djangoproject.com/en/6.1/ref/settings/#server-email)
+    settings. Consider setting up exception logging with [Sentry](https://sentry.io/for/django/).
+* Use a reverse proxy. Do not expose the Healthchecks instance directly to the public
+  internet, put a reverse proxy such as nginx, HAProxy, or Caddy in front of it.
+
+  **Important:** configure the reverse proxy to set the `X-Forwarded-For` request
+  header. Healthchecks trusts it to determine the client's IP address. If the proxy
+  does not set the `X-Forwarded-For` header, the clients can pass their own value and
+  circumvent, among other things, the IP-based rate limiting in the login form.
+* Management commands that need to be run during each version upgrade.
+  * `manage.py compress` – creates combined JS and CSS bundles and
+     places them in the `static-collected` directory.
+  * `manage.py collectstatic` – collects static files in the `static-collected`
+     directory.
+  * `manage.py migrate` – applies any pending database schema changes
+     and data migrations.
 * Processes that need to be running constantly.
-  * `manage.py runserver` is intended for development only. Do not use it in production,
-    instead consider using [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) or
-    [gunicorn](https://gunicorn.org/).
-  * Make sure the `manage.py sendalerts` command is running and can survive server restarts.
-    On modern linux systems, a good option is to
-    [define a systemd service](https://github.com/healthchecks/healthchecks/issues/273#issuecomment-520560304) for it.
+  * `manage.py runserver` is intended for development only.
+     **Do not use it in production**, instead consider using
+     [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) or
+     [gunicorn](https://gunicorn.org/).
+     An example of a minimal setup would be to install uWSGI using `pip3 install uwsgi`,
+     and to run `uwsgi --http :8000 --module hc.wsgi` from the project's root directory.
+  *  `manage.py sendalerts` is the process that monitors checks and sends out
+     monitoring alerts. It must be always running, it must be started on reboot, and it
+     must be restarted if it itself crashes. On modern linux systems, a good option is
+     to [define a systemd service](https://github.com/healthchecks/healthchecks/issues/273#issuecomment-520560304)
+     for it.
+  * `manage.py sendreports --loop` is the command that sends periodic email reports and
+     the email reminders when any checks are down. If you need this functionality, make
+     sure `manage.py sendreports --loop` is started on reboot and is always running,
+     same as `manage.py sendalerts`.
+* Static files. Healthchecks serves static files on its own, no configuration
+  required. It uses the [Whitenoise library](http://whitenoise.evans.io/en/stable/index.html)
+  for this.
 * General
   * Make sure the database is secured well and is getting backed up regularly
   * Make sure the TLS certificates are secured well and are getting refreshed regularly
   * Have monitoring in place to be sure the Healthchecks instance itself is operational
     (is accepting pings, is sending out alerts, is not running out of resources).
+
+## Docker Image
+
+Healthchecks provides a reference Dockerfile and prebuilt Docker images for every
+release. The Dockerfile lives in the [/docker/](https://github.com/healthchecks/healthchecks/tree/master/docker)
+directory, and Docker images for amd64, arm/v7 and arm64 architectures are available
+[on Docker Hub](https://hub.docker.com/r/healthchecks/healthchecks).
+
+The Docker images:
+
+* Run database migrations on startup, and to run `sendalerts`, `sendreports`, and
+  `smtpd` in the background. You do not need to run them separately.
+* Ship with both PostgreSQL and MySQL database drivers.
+* Serve static files using the whitenoise library.
+* Have the apprise library preinstalled.
+* Do *not* handle TLS termination. In a production setup, you will want to put
+  the Healthchecks container behind a reverse proxy or load balancer that handles TLS
+  termination.

@@ -1,23 +1,31 @@
-from django.contrib import auth
-from django.contrib.auth.middleware import RemoteUserMiddleware
+from __future__ import annotations
+
+from typing import cast
+
 from django.conf import settings
+from django.contrib import auth
+from django.core.exceptions import MiddlewareNotUsed
+from django.http import HttpRequest, HttpResponse
 
+from hc.accounts.http import AuthenticatedHttpRequest
 from hc.accounts.models import Profile
+from hc.lib.typealias import MiddlewareFunc
 
 
-class TeamAccessMiddleware(object):
-    def __init__(self, get_response):
+class TeamAccessMiddleware:
+    def __init__(self, get_response: MiddlewareFunc) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponse:
         if not request.user.is_authenticated:
             return self.get_response(request)
 
+        request = cast(AuthenticatedHttpRequest, request)
         request.profile = Profile.objects.for_user(request.user)
         return self.get_response(request)
 
 
-class CustomHeaderMiddleware(RemoteUserMiddleware):
+class CustomHeaderMiddleware:
     """
     Middleware for utilizing Web-server-provided authentication.
 
@@ -27,10 +35,14 @@ class CustomHeaderMiddleware(RemoteUserMiddleware):
 
     """
 
-    def process_request(self, request):
+    def __init__(self, get_response: MiddlewareFunc) -> None:
         if not settings.REMOTE_USER_HEADER:
-            return
+            raise MiddlewareNotUsed()
 
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        assert settings.REMOTE_USER_HEADER
         # Make sure AuthenticationMiddleware is installed
         assert hasattr(request, "user")
 
@@ -40,14 +52,20 @@ class CustomHeaderMiddleware(RemoteUserMiddleware):
             # authenticated user and return
             if request.user.is_authenticated:
                 auth.logout(request)
-            return
+            return self.get_response(request)
+
+        # The email address from the external authentication system may be in
+        # in upper case or mixed case. Convert it to lower case, as we do
+        # elsewhere in the system (when registering new users, when inviting users
+        # into projects, when changing email address) to avoid naming conflicts.
+        email = email.lower()
 
         # If the user is already authenticated and that user is the user we are
         # getting passed in the headers, then the correct user is already
         # persisted in the session and we don't need to continue.
         if request.user.is_authenticated:
             if request.user.email == email:
-                return
+                return self.get_response(request)
             else:
                 # An authenticated user is associated with the request, but
                 # it does not match the authorized user in the header.
@@ -55,9 +73,10 @@ class CustomHeaderMiddleware(RemoteUserMiddleware):
 
         # We are seeing this user for the first time in this session, attempt
         # to authenticate the user.
-        user = auth.authenticate(request, remote_user_email=email)
-        if user:
+        if user := auth.authenticate(request, remote_user_email=email):
             # User is valid.  Set request.user and persist user in the session
             # by logging the user in.
             request.user = user
             auth.login(request, user)
+
+        return self.get_response(request)

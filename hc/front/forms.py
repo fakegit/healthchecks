@@ -1,57 +1,41 @@
-from datetime import timedelta as td
+from __future__ import annotations
+
 import json
 import re
-from urllib.parse import quote, urlencode
+from datetime import datetime, timezone
+from datetime import timedelta as td
 
 from django import forms
-from django.forms import URLField
-from django.conf import settings
-from django.core.exceptions import ValidationError
+
 from hc.front.validators import (
-    CronExpressionValidator,
+    CronValidator,
+    OnCalendarValidator,
     TimezoneValidator,
     WebhookValidator,
 )
-import requests
 
 
-class HeadersField(forms.Field):
-    message = """Use "Header-Name: value" pairs, one per line."""
+def _choices(csv: str) -> list[tuple[str, str]]:
+    return [(v, v) for v in csv.split(",")]
 
-    def to_python(self, value):
-        if not value:
-            return {}
 
-        headers = {}
-        for line in value.split("\n"):
-            if not line.strip():
-                continue
+class LaxURLField(forms.URLField):
+    """Subclass of URLField which additionally accepts URLs without a tld.
 
-            if ":" not in line:
-                raise ValidationError(self.message)
+    For example, unlike URLField, it accepts "http://home_server"
 
-            n, v = line.split(":", maxsplit=1)
-            n, v = n.strip(), v.strip()
-            if not n or not v:
-                raise ValidationError(message=self.message)
+    """
 
-            headers[n] = v
-
-        return headers
-
-    def validate(self, value):
-        super().validate(value)
-        for k, v in value.items():
-            if len(k) > 1000 or len(v) > 1000:
-                raise ValidationError("Value too long")
+    default_validators = [WebhookValidator()]
 
 
 class NameTagsForm(forms.Form):
     name = forms.CharField(max_length=100, required=False)
+    slug = forms.SlugField(max_length=100, required=False)
     tags = forms.CharField(max_length=500, required=False)
-    desc = forms.CharField(required=False)
+    desc = forms.CharField(max_length=10000, required=False)
 
-    def clean_tags(self):
+    def clean_tags(self) -> str:
         result = []
 
         for part in self.cleaned_data["tags"].split(" "):
@@ -62,135 +46,90 @@ class NameTagsForm(forms.Form):
         return " ".join(result)
 
 
+class AddCheckForm(NameTagsForm):
+    kind = forms.ChoiceField(choices=_choices("simple,cron,oncalendar"))
+    timeout = forms.IntegerField(min_value=60, max_value=31536000)
+    schedule = forms.CharField(required=False, max_length=100)
+    tz = forms.CharField(max_length=36, validators=[TimezoneValidator()])
+    grace = forms.IntegerField(min_value=60, max_value=31536000)
+
+    def clean_timeout(self) -> td:
+        return td(seconds=self.cleaned_data["timeout"])
+
+    def clean_grace(self) -> td:
+        return td(seconds=self.cleaned_data["grace"])
+
+    def clean_schedule(self) -> str:
+        kind = self.cleaned_data.get("kind")
+        if kind == "cron":
+            cron_validator = CronValidator()
+            cron_validator(self.cleaned_data["schedule"])
+        elif kind == "oncalendar":
+            oncalendar_validator = OnCalendarValidator()
+            oncalendar_validator(self.cleaned_data["schedule"])
+        else:
+            # If kind is not cron or oncalendar, ignore the passed in value
+            # and use "* * * * *" instead.
+            return "* * * * *"
+
+        assert isinstance(self.cleaned_data["schedule"], str)
+        return self.cleaned_data["schedule"]
+
+
 class FilteringRulesForm(forms.Form):
-    filter_by_subject = forms.ChoiceField(choices=(("no", "no"), ("yes", "yes")))
-    subject = forms.CharField(required=False, max_length=100)
-    subject_fail = forms.CharField(required=False, max_length=100)
+    filter_subject = forms.BooleanField(required=False)
+    filter_body = forms.BooleanField(required=False)
+    filter_http_body = forms.BooleanField(required=False)
+    filter_default_fail = forms.BooleanField(required=False)
+    start_kw = forms.CharField(required=False, max_length=200)
+    success_kw = forms.CharField(required=False, max_length=200)
+    failure_kw = forms.CharField(required=False, max_length=200)
     methods = forms.ChoiceField(required=False, choices=(("", "Any"), ("POST", "POST")))
     manual_resume = forms.BooleanField(required=False)
 
-    def clean_subject(self):
-        if self.cleaned_data["filter_by_subject"] == "yes":
-            return self.cleaned_data["subject"]
-
-        return ""
-
-    def clean_subject_fail(self):
-        if self.cleaned_data["filter_by_subject"] == "yes":
-            return self.cleaned_data["subject_fail"]
-
-        return ""
-
 
 class TimeoutForm(forms.Form):
-    timeout = forms.IntegerField(min_value=60, max_value=2592000)
-    grace = forms.IntegerField(min_value=60, max_value=2592000)
+    timeout = forms.IntegerField(min_value=60, max_value=31536000)
+    grace = forms.IntegerField(min_value=60, max_value=31536000)
 
-    def clean_timeout(self):
+    def clean_timeout(self) -> td:
         return td(seconds=self.cleaned_data["timeout"])
 
-    def clean_grace(self):
+    def clean_grace(self) -> td:
         return td(seconds=self.cleaned_data["grace"])
 
 
-class CronForm(forms.Form):
-    schedule = forms.CharField(max_length=100, validators=[CronExpressionValidator()])
+class CronPreviewForm(forms.Form):
+    schedule = forms.CharField(max_length=100, validators=[CronValidator()])
     tz = forms.CharField(max_length=36, validators=[TimezoneValidator()])
-    grace = forms.IntegerField(min_value=1, max_value=43200)
 
 
-class AddOpsgenieForm(forms.Form):
-    error_css_class = "has-error"
-    region = forms.ChoiceField(initial="us", choices=(("us", "US"), ("eu", "EU")))
-    key = forms.CharField(max_length=40)
+class CronForm(forms.Form):
+    schedule = forms.CharField(max_length=100, validators=[CronValidator()])
+    tz = forms.CharField(max_length=36, validators=[TimezoneValidator()])
+    grace = forms.IntegerField(min_value=60, max_value=31536000)
+
+    def clean_grace(self) -> td:
+        return td(seconds=self.cleaned_data["grace"])
 
 
-PRIO_CHOICES = [
-    ("-2", "Lowest Priority"),
-    ("-1", "Low Priority"),
-    ("0", "Normal Priority"),
-    ("1", "High Priority"),
-    ("2", "Emergency Priority"),
-]
+class OnCalendarPreviewForm(forms.Form):
+    schedule = forms.CharField(max_length=100, validators=[OnCalendarValidator()])
+    tz = forms.CharField(max_length=36, validators=[TimezoneValidator()])
 
 
-class AddPushoverForm(forms.Form):
-    error_css_class = "has-error"
-    pushover_user_key = forms.CharField()
-    prio = forms.ChoiceField(initial="0", choices=PRIO_CHOICES)
-    prio_up = forms.ChoiceField(initial="0", choices=PRIO_CHOICES)
+class OnCalendarForm(forms.Form):
+    schedule = forms.CharField(max_length=100, validators=[OnCalendarValidator()])
+    tz = forms.CharField(max_length=36, validators=[TimezoneValidator()])
+    grace = forms.IntegerField(min_value=60, max_value=31536000)
 
-    def get_value(self):
-        key = self.cleaned_data["pushover_user_key"]
-        prio = self.cleaned_data["prio"]
-        prio_up = self.cleaned_data["prio_up"]
-        return "%s|%s|%s" % (key, prio, prio_up)
-
-
-class AddEmailForm(forms.Form):
-    error_css_class = "has-error"
-    value = forms.EmailField(max_length=100)
-    down = forms.BooleanField(required=False, initial=True)
-    up = forms.BooleanField(required=False, initial=True)
-
-    def clean(self):
-        super().clean()
-
-        down = self.cleaned_data.get("down")
-        up = self.cleaned_data.get("up")
-
-        if not down and not up:
-            self.add_error("down", "Please select at least one.")
+    def clean_grace(self) -> td:
+        return td(seconds=self.cleaned_data["grace"])
 
 
 class AddUrlForm(forms.Form):
     error_css_class = "has-error"
-    value = forms.URLField(max_length=1000, validators=[WebhookValidator()])
-
-
-METHODS = ("GET", "POST", "PUT")
-
-
-class WebhookForm(forms.Form):
-    error_css_class = "has-error"
-    name = forms.CharField(max_length=100, required=False)
-
-    method_down = forms.ChoiceField(initial="GET", choices=zip(METHODS, METHODS))
-    body_down = forms.CharField(max_length=1000, required=False)
-    headers_down = HeadersField(required=False)
-    url_down = URLField(
-        max_length=1000, required=False, validators=[WebhookValidator()]
-    )
-
-    method_up = forms.ChoiceField(initial="GET", choices=zip(METHODS, METHODS))
-    body_up = forms.CharField(max_length=1000, required=False)
-    headers_up = HeadersField(required=False)
-    url_up = forms.URLField(
-        max_length=1000, required=False, validators=[WebhookValidator()]
-    )
-
-    def clean(self):
-        super().clean()
-
-        url_down = self.cleaned_data.get("url_down")
-        url_up = self.cleaned_data.get("url_up")
-
-        if not url_down and not url_up:
-            if not self.has_error("url_down"):
-                self.add_error("url_down", "Enter a valid URL.")
-
-    def get_value(self):
-        return json.dumps(dict(self.cleaned_data), sort_keys=True)
-
-
-class AddShellForm(forms.Form):
-    error_css_class = "has-error"
-
-    cmd_down = forms.CharField(max_length=1000, required=False)
-    cmd_up = forms.CharField(max_length=1000, required=False)
-
-    def get_value(self):
-        return json.dumps(dict(self.cleaned_data), sort_keys=True)
+    value = LaxURLField(max_length=1000, assume_scheme="https")
 
 
 class PhoneNumberForm(forms.Form):
@@ -198,8 +137,9 @@ class PhoneNumberForm(forms.Form):
     label = forms.CharField(max_length=100, required=False)
     phone = forms.CharField()
 
-    def clean_phone(self):
+    def clean_phone(self) -> str:
         v = self.cleaned_data["phone"]
+        assert isinstance(v, str)
 
         stripped = v.encode("ascii", "ignore").decode("ascii")
         stripped = stripped.replace(" ", "").replace("-", "")
@@ -208,7 +148,7 @@ class PhoneNumberForm(forms.Form):
 
         return stripped
 
-    def get_json(self):
+    def get_json(self) -> str:
         return json.dumps({"value": self.cleaned_data["phone"]})
 
 
@@ -216,7 +156,16 @@ class PhoneUpDownForm(PhoneNumberForm):
     up = forms.BooleanField(required=False, initial=True)
     down = forms.BooleanField(required=False, initial=True)
 
-    def get_json(self):
+    def clean(self) -> None:
+        super().clean()
+
+        down = self.cleaned_data.get("down")
+        up = self.cleaned_data.get("up")
+
+        if not down and not up:
+            self.add_error("down", "Please select at least one.")
+
+    def get_json(self) -> str:
         return json.dumps(
             {
                 "value": self.cleaned_data["phone"],
@@ -230,63 +179,44 @@ class ChannelNameForm(forms.Form):
     name = forms.CharField(max_length=100, required=False)
 
 
-class AddMatrixForm(forms.Form):
-    error_css_class = "has-error"
-    alias = forms.CharField(max_length=100)
-
-    def clean_alias(self):
-        v = self.cleaned_data["alias"]
-
-        # validate it by trying to join
-        url = settings.MATRIX_HOMESERVER
-        url += "/_matrix/client/r0/join/%s?" % quote(v)
-        url += urlencode({"access_token": settings.MATRIX_ACCESS_TOKEN})
-        r = requests.post(url, {})
-        if r.status_code == 429:
-            raise forms.ValidationError(
-                "Matrix server returned status code 429 (Too Many Requests), "
-                "please try again later."
-            )
-
-        doc = r.json()
-        if "error" in doc:
-            raise forms.ValidationError("Response from Matrix: %s" % doc["error"])
-
-        self.cleaned_data["room_id"] = doc["room_id"]
-
-        return v
+class SearchForm(forms.Form):
+    q = forms.RegexField(regex=r"^[0-9a-zA-Z\s]{3,100}$")
 
 
-class AddAppriseForm(forms.Form):
-    error_css_class = "has-error"
-    url = forms.CharField(max_length=512)
+class LogFiltersForm(forms.Form):
+    # min_value is 2010-01-01, max_value is 2030-01-01
+    u = forms.FloatField(min_value=1262296800, max_value=1893448800, required=False)
+    end = forms.FloatField(min_value=1262296800, max_value=1893448800, required=False)
+    success = forms.BooleanField(required=False)
+    fail = forms.BooleanField(required=False)
+    start = forms.BooleanField(required=False)
+    log = forms.BooleanField(required=False)
+    ign = forms.BooleanField(required=False)
+    notification = forms.BooleanField(required=False)
+    flip = forms.BooleanField(required=False)
+
+    def clean_u(self) -> datetime | None:
+        if self.cleaned_data["u"]:
+            return datetime.fromtimestamp(self.cleaned_data["u"], tz=timezone.utc)
+        return None
+
+    def clean_end(self) -> datetime | None:
+        if self.cleaned_data["end"]:
+            return datetime.fromtimestamp(self.cleaned_data["end"], tz=timezone.utc)
+        return None
+
+    def kinds(self) -> tuple[str, ...]:
+        kind_keys = ("success", "fail", "start", "log", "ign", "notification", "flip")
+        return tuple(key for key in kind_keys if self.cleaned_data[key])
 
 
-class AddPdForm(forms.Form):
-    error_css_class = "has-error"
-    value = forms.CharField(max_length=32)
+class TransferForm(forms.Form):
+    project = forms.UUIDField()
 
 
-ZULIP_TARGETS = (("stream", "Stream"), ("private", "Private"))
-
-
-class AddZulipForm(forms.Form):
-    error_css_class = "has-error"
-    bot_email = forms.EmailField(max_length=100)
-    api_key = forms.CharField(max_length=50)
-    site = forms.URLField(max_length=100, validators=[WebhookValidator()])
-    mtype = forms.ChoiceField(choices=ZULIP_TARGETS)
-    to = forms.CharField(max_length=100)
-
-    def get_value(self):
-        return json.dumps(dict(self.cleaned_data), sort_keys=True)
-
-
-class AddTrelloForm(forms.Form):
-    token = forms.RegexField(regex=r"^[0-9a-fA-F]{64}$")
-    board_name = forms.CharField(max_length=100)
-    list_name = forms.CharField(max_length=100)
-    list_id = forms.RegexField(regex=r"^[0-9a-fA-F]{16,32}$")
-
-    def get_value(self):
-        return json.dumps(dict(self.cleaned_data), sort_keys=True)
+class BadgeSettingsForm(forms.Form):
+    target = forms.ChoiceField(choices=_choices("all,tag,check"))
+    tag = forms.CharField(max_length=100, required=False)
+    check = forms.UUIDField(required=False)
+    fmt = forms.ChoiceField(choices=_choices("svg,json,shields"))
+    states = forms.ChoiceField(choices=_choices("2,3"))

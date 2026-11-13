@@ -1,9 +1,15 @@
 <!DOCTYPE html>
-{% load hc_extras humanize %}
+{% load hc_extras humanize tz %}
+{% timezone tz %}
 
 <p>
-    "{{ check.name_then_code }}" is {{ check.status|upper }}.
-    <a href="{{ check.details_url }}">View on {% site_name %}&hellip;</a>
+    {% if flip.new_status == "down" %}
+    "{{ check.name_then_code }}" is DOWN{% if flip.reason %} ({{ flip.reason_long }}){% endif %}.
+    {% else %}
+    "{{ check.name_then_code }}" is UP.
+    {% if flip.down_duration %}The downtime lasted {{ flip.down_duration|hc_duration_for_sentence }}.{% endif%}
+    {% endif %}
+    <a href="{{ check.cloaked_url }}">View on {% site_name %}&hellip;</a>
 </p>
 
 
@@ -43,17 +49,22 @@
         {{ trtr|safe }} {% cycle trtr %}
         {% endif %}
 
-        {% if check.kind == "cron" %}
+        {% if check.kind == "cron" or check.kind == "oncalendar" %}
         <td style="padding-right: 32px; padding-bottom: 8px; vertical-align: top;">
             <b>Schedule</b><br>
             <code>{{ check.schedule }}</code>
+        </td>
+        {{ trtr|safe }} {% cycle trtr %}
+        <td style="padding-right: 32px; padding-bottom: 8px; vertical-align: top;">
+            <b>Time Zone</b><br>
+            {{ check.tz }}
         </td>
         {{ trtr|safe }} {% cycle trtr %}
         {% endif %}
 
         <td style="padding-right: 32px; padding-bottom: 8px; vertical-align: top;">
             <b>Total Pings</b><br>
-            {{ check.n_pings }}
+            {% if ping %}{{ ping.n }}{% else %}0{% endif %}
             {% if check.created %}(since {{ check.created|date:'M j, Y' }}){% endif %}
         </td>
     </tr>
@@ -66,7 +77,11 @@
         </td>
         <td style="padding-right: 32px; padding-bottom: 8px; vertical-align: top;">
             <b>Last Ping Type</b><br>
-            {% if ping.exitstatus > 0 %}
+            {% if ping.kind == "ign" %}
+            <span style="background-color: #eeeeee; color: #333333; padding-left: 4px; padding-right: 4px; border-radius: 2px;">
+                Ignored
+            </span>
+            {% elif ping.exitstatus > 0 %}
             <span style="background-color: #f2dede; color: #333333; padding-left: 4px; padding-right: 4px; border-radius: 2px;">
                 Exit status {{ ping.exitstatus }}
             </span>
@@ -82,9 +97,9 @@
             <span style="background-color: #dff0d8; color: #333333; padding-left: 4px; padding-right: 4px; border-radius: 2px;">
                 Started
             </span>
-            {% elif ping.kind == "ign" %}
+            {% elif ping.kind == "log" %}
             <span style="background-color: #eeeeee; color: #333333; padding-left: 4px; padding-right: 4px; border-radius: 2px;">
-                Ignored
+                Log
             </span>
             {% else %}
             <span style="background-color: #dff0d8; color: #333333; padding-left: 4px; padding-right: 4px; border-radius: 2px;">
@@ -94,11 +109,37 @@
         </td>
     </tr>
     {% endif %}
+
+    <tr>
+        <td style="padding-right: 32px; padding-bottom: 8px; vertical-align: top;">
+            <b>Status Changed to {{ flip.new_status|title }} at</b><br>
+            {{ flip.created|date:"r" }}
+        </td>
+    </tr>
 </table>
 
-{% if ping and ping.body %}
-<p><b>Last Ping Body</b></p>
-<pre>{{ ping.body|slice:":10000"|linebreaksbr }}{% if ping.body|length > 10000 %} [truncated]{% endif %}</pre>
+{% if subject %}
+<p><b>Last Ping Subject</b><br>{{ subject }}</p>
+{% endif %}
+
+{% if ping and ping.has_body %}
+    <p><b>Last Ping Body</b>
+    {% if body|length > 10000 and not ping_attached %}
+        <br>
+        Showing the last 10000 bytes of {{ body|length}} bytes total.
+        <a href="{{ check.cloaked_url }}#ping-{{ ping.n }}">View full body</a>.
+    {% endif %}
+    </p>
+    {% if body is None %}
+    <p>
+        The request body data is being processed and will be available for viewing shortly.
+        Please <a href="{{ check.cloaked_url }}#ping-{{ ping.n }}">view it on the website</a>.
+    </p>
+    {% elif ping_attached %}
+    <p>See the attachment.</p>
+    {% else %}
+    <pre style="font-family: monospace; line-height: 1em;">{{ body|slice:"-10000:"|linebreaksbr }}</pre>
+    {% endif %}
 {% endif %}
 
 {% if projects %}
@@ -123,14 +164,12 @@
 </table>
 {% endif %}
 
-<p style="color: #666666">
+<br>
+<p style="color: #666666; font-size: 90%">
 &mdash;<br>
-{% site_name %}<br>
-<a href="{{ unsub_link }}" target="_blank" style="color: #666666; text-decoration: underline;">
-    {% if check.project.name %}
-    Unsubscribe from "{{ check.project.name }}" notifications
-    {% else %}
-    Unsubscribe
-    {% endif %}
-</a>
+You are receiving this email because you are subscribed to {% site_name %} monitoring
+notifications{% if check.project.name %} for project "{{ check.project.name }}"{% endif %}.<br>
+Don't want to receive these notifications?
+<a href="{{ unsub_link }}" target="_blank" style="color: #666666; text-decoration: underline;">Unsubscribe</a>.
 </p>
+{% endtimezone %}

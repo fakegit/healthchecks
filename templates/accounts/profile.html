@@ -25,6 +25,7 @@
     <div class="col-sm-3">
         <ul class="nav nav-pills nav-stacked">
             <li class="active"><a href="{% url 'hc-profile' %}">Account</a></li>
+            <li><a href="{% url 'hc-appearance' %}">Appearance</a></li>
             {% if show_pricing %}
             <li><a href="{% url 'hc-billing' %}">Billing</a></li>
             {% endif %}
@@ -38,7 +39,7 @@
                 <form method="post">
                     {% csrf_token %}
                     <h2>Email and Password</h2>
-                    <p>
+                    <p class="settings-bar">
                         Your account's email address is
                         <code>{{ request.user.email }}</code>
 
@@ -47,12 +48,21 @@
                             class="btn btn-default pull-right">Change Email</a>
                     </p>
                     <p class="clearfix"></p>
-                    <p>
-                        Attach a password to your {{ site_name }} account
+                    {% if request.user.has_usable_password %}
+                    <p class="settings-bar">
+                        Password authentication is enabled.
+                        <a
+                            href="{% url 'hc-set-password' %}"
+                            class="btn btn-default pull-right">Change Password</a>
+                    </p>
+                    {% else %}
+                    <p class="settings-bar">
+                        Attach a password to your {{ site_name }} account.
                         <a
                             href="{% url 'hc-set-password' %}"
                             class="btn btn-default pull-right">Set Password</a>
                     </p>
+                    {% endif %}
                 </form>
             </div>
             {% if changed_password %}
@@ -62,50 +72,112 @@
             {% endif %}
         </div>
 
-        {% if use_2fa %}
         <div class="panel panel-{{ 2fa_status }}">
             <div class="panel-body settings-block">
                 <form method="post">
                     {% csrf_token %}
                     <h2>Two-factor Authentication</h2>
-                    {% if credentials %}
 
                     <table id="my-keys" class="table">
+                        {% if use_webauthn %}
                         <tr>
                             <th>Security keys</th>
+                            <th></th>
                         </tr>
                         {% for credential in credentials %}
                         <tr>
                             <td>
-                                <strong>{{ credential.name|default:"unnamed" }}</strong>
+                                {{ credential.name|default:"unnamed" }}
+                                <span class="text-muted">
                                 – registered on {{ credential.created|date:"M j, Y" }}
+                                </span>
                             </td>
                             <td class="text-right">
                                 <a href="{% url 'hc-remove-credential' credential.code  %}">Remove</a>
                             </td>
                         </tr>
+                        {% empty %}
+                        <tr>
+                            <td class="missing" colspan="2">No registered security keys</td>
+                        </tr>
                         {% endfor %}
+                        {% endif %}
+
+                        <tr>
+                            <th>Authenticator app</th>
+                            <th></th>
+                        </tr>
+                        {% if profile.totp %}
+                        <tr>
+                            <td>
+                                Enabled
+                                <span class="text-muted">
+                                – configured on {{ profile.totp_created|date:"M j, Y" }}
+                                </span>
+                            </td>
+                            <td class="text-right">
+                                <a href="{% url 'hc-remove-totp' %}">Remove</a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td class="missing" colspan="2">Not configured</td>
+                        </tr>
+                        {% endif %}
                     </table>
 
-                    {% if credentials|length == 1 %}
+                    {% if credentials|length == 1 and not profile.totp %}
+                    <div class="alert alert-warning">
+                        <p>
+                        <strong>The key "{% for c in credentials%}{{ c.name }}{% endfor %}" is currently your only second factor.</strong>
+                        If you lose this key, or it stops working, you will lose
+                        access to your {% site_name %} account.
+                        </p>
+                        <p>
+                        Register a second security key, to be used
+                        as a backup second factor.
+                        </p>
+                    </div>
+                    {% endif %}
+
+                    {% if not credentials and profile.totp %}
+                    <div class="alert alert-warning">
+                        <p>
+                        <strong>The Authenticator app is currently your only second factor.</strong>
+                        If you lose access to it, you will lose access to your
+                        {% site_name %} account.
+                        </p>
+                        <p>
+                        Make sure you have a backup of the Authenticator app's TOTP
+                        seed{% if use_webauthn %}, or register a Security Key to be used as a backup second factor{% endif %}.
+                        </p>
+                    </div>
+                    {% endif %}
+
+                    {% if not credentials and not profile.totp %}
                     <p class="alert alert-info">
-                        <strong>Tip: add a second key!</strong>
-                        It is a good practice to register at least two security keys
-                        and store them separately.
+                    Two-factor authentication is currently <strong>inactive</strong>.
+                    Your account does not have any configured two-factor authentication
+                    methods.
                     </p>
                     {% endif %}
 
-                    {% else %}
-                    <p>
-                        Two-factor authentication is not enabled yet.<br />
-                        Your account has no registered security keys.
-                    </p>
-                    {% endif %}
-                    <a
-                        href="{% url 'hc-add-credential' %}"
-                        class="btn btn-default pull-right">
-                        Register New Security Key
-                    </a>
+                    <div class="pull-right">
+                        {% if not profile.totp %}
+                        <a
+                            href="{% url 'hc-add-totp' %}"
+                            class="btn btn-default">
+                            Set Up Authenticator App
+                        </a>
+                        {% endif %}
+                        {% if use_webauthn %}
+                        <a
+                            href="{% url 'hc-add-webauthn' %}"
+                            class="btn btn-default">
+                            Add Security Key
+                        </a>
+                        {% endif %}
+                    </div>
                 </form>
             </div>
 
@@ -120,22 +192,33 @@
                 Removed security key <strong>{{ removed_credential_name }}</strong>.
             </div>
             {% endif %}
+
+            {% if enabled_totp %}
+            <div class="panel-footer">
+                Successfully set up the Authenticator app.
+            </div>
+            {% endif %}
+
+            {% if disabled_totp %}
+            <div class="panel-footer">
+                Disabled the authenticator app.
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
 
         <div class="panel panel-{{ my_projects_status }}">
             <div class="panel-body settings-block">
                     {% csrf_token %}
                     <h2>My Projects</h2>
 
-                    {% if profile.projects.exists %}
+                    {% if ownerships or memberships %}
                     <table id="my-projects" class="table">
                         <tr>
                             <th>Project</th>
                             <th>My role</th>
                             <th></th>
                         </tr>
-                        {% for project in request.user.project_set.all %}
+                        {% for project in ownerships %}
                         <tr>
                             <td>
                                 <div class="name">
@@ -153,7 +236,7 @@
                         </tr>
                         {% endfor %}
 
-                        {% for m in request.user.memberships.all %}
+                        {% for m in memberships %}
                         <tr>
                             <td>
                                 <div class="name">
@@ -162,13 +245,7 @@
                                     </a>
                                 </div>
                             </td>
-                            <td>
-                                {% if m.rw %}
-                                Member
-                                {% else %}
-                                Read-only
-                                {% endif %}
-                            </td>
+                            <td>{{ m.get_role_display }}</td>
                             <td>
                                 <a
                                     href="#"
@@ -198,17 +275,53 @@
             {% endif %}
         </div>
 
+        <div class="panel panel-{{ tz_status }}">
+            <div id="tz-settings" class="panel-body settings-block">
+                <form method="post">
+                    {% csrf_token %}
+                    <h2>Preferred Time Zone</h2>
+                    <select id="tz" name="tz" class="form-control" value="{{ profile.tz }}">
+                        <option{% if profile.tz == "UTC" %} selected{% endif %}>UTC</option>
+                        {% for tz in timezones %}
+                        {% if tz != "UTC" %}
+                        <option{% if profile.tz == tz %} selected{% endif %}>{{ tz }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+
+                    <br />
+                    <p id="browser-tz-hint" class="hide">
+                        Tip: your browser's time zone is <b>FIXME</b>.
+                        <a href="#">Use it instead?</a>
+                    </p>
+
+                    <p>{% site_name %} will use your preferred time zone to:</p>
+                    <ul>
+                        <li>Format dates and times here in the web interface.</li>
+                        <li>Format dates and times in monitoring alerts.</li>
+                        <li>
+                            Deliver <a href="{% url 'hc-profile' %}">email reports</a>
+                            (if enabled) between 9:00 and 11:00 local time.
+                        </li>
+                    </ul>
+                    <br />
+                    <button type="submit" class="btn btn-default pull-right">Save Changes</button>
+                </form>
+            </div>
+            {% if tz_updated %}
+            <div class="panel-footer">
+                Time zone updated!
+            </div>
+            {% endif %}
+        </div>
+
         <div class="panel panel-default">
             <div class="panel-body settings-block">
-                    {% csrf_token %}
-                    <h2>Close Account</h2>
-                    <p>This will permanently remove your {{ site_name }} account.</p>
-                    <div class="text-right">
-                        <a
-                            id="close-account"
-                            href="{% url 'hc-close' %}"
-                            class="btn btn-default">Close Account</a>
-                    </div>
+                <h2>Close Account</h2>
+                <p>This will permanently remove your {{ site_name }} account.</p>
+                <div class="text-right">
+                    <a href="{% url 'hc-close' %}" class="btn btn-remove">Close Account</a>
+                </div>
             </div>
         </div>
     </div>
@@ -252,8 +365,7 @@
 
 {% block scripts %}
 {% compress js %}
-<script src="{% static 'js/jquery-2.1.4.min.js' %}"></script>
-<script src="{% static 'js/bootstrap.min.js' %}"></script>
+<script src="{% static 'js/tom-select.popular.min.js' %}"></script>
 <script src="{% static 'js/add_project_modal.js' %}"></script>
 <script src="{% static 'js/profile.js' %}"></script>
 {% endcompress %}

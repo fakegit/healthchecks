@@ -1,4 +1,7 @@
 $(function () {
+    var base = document.getElementById("base-url").getAttribute("href").slice(0, -1);
+    var favicon = document.querySelector('link[rel="icon"]');
+
     $("#edit-name").click(function() {
         $('#update-name-modal').modal("show");
         $("#update-name-input").focus();
@@ -6,7 +9,7 @@ $(function () {
         return false;
     });
 
-    // Configure Selectize for entering tags
+    // Configure Tom-Select for entering tags
     function toOption(tag) {
         return {value: tag}
     }
@@ -15,15 +18,18 @@ $(function () {
     // to a JS object, but we need an unconverted string:
     var allTags = $("#update-tags-input").attr("data-all-tags");
     var options = allTags ? allTags.split(" ").map(toOption) : [];
-    $("#update-tags-input").selectize({
+    new TomSelect("#update-tags-input", {
         create: true,
         createOnBlur: true,
         delimiter: " ",
-        labelField: "value",
-        searchField: ["value"],
+        diacritics: false,
         hideSelected: true,
         highlight: false,
-        options: options
+        labelField: "value",
+        options: options,
+        refreshThrottle: 0,
+        render: {no_results:(data, escape) => ""},
+        searchField: ["value"],
     });
 
     $("#new-check-alert a").click(function() {
@@ -38,7 +44,7 @@ $(function () {
         return false;
     });
 
-    $("#log-status-text").on("click", "#resume-btn", function() {
+    $("#current-status-text").on("click", "#resume-btn", function() {
         $("#resume-form").submit();
         return false;
     });
@@ -61,7 +67,7 @@ $(function () {
         }, 300);
     });
 
-    $("#details-integrations.rw tr").click(function() {
+    $(".details-integrations.rw tr").click(function() {
         var isOn = $(this).toggleClass("on").hasClass("on");
         $(".label", this).text(isOn ? "ON" : "OFF");
 
@@ -75,8 +81,12 @@ $(function () {
     });
 
     var statusUrl = document.getElementById("events").dataset.statusUrl;
+    // Look up the active tz switch to determine the initial display timezone:
+    var initialTz = $(".active", "#tz-switcher").data("tz");
+    var dateFormatter = new DateFormatter(initialTz);
     var lastStatusText = "";
     var lastUpdated = "";
+    var lastStarted = false;
     adaptiveSetInterval(function() {
         $.ajax({
             url: statusUrl + (lastUpdated ? "?u=" + lastUpdated : ""),
@@ -85,16 +95,21 @@ $(function () {
             success: function(data) {
                 if (data.status_text != lastStatusText) {
                     lastStatusText = data.status_text;
-                    $("#log-status-icon").attr("class", "status ic-" + data.status);
-                    $("#log-status-text").html(data.status_text);
+                    $("#current-status-icon").attr("class", "status ic-" + data.status);
+                    $("#current-status-text").html(data.status_text);
 
-                    $('#pause-btn').prop('disabled', data.status == "paused");
+                    $('#pause-btn').prop('disabled', data.status == "paused" && !data.started);
+                }
+
+                if (data.started != lastStarted) {
+                    lastStarted = data.started;
+                    $("#current-status-spinner").toggleClass("started", data.started);
                 }
 
                 if (data.events) {
                     lastUpdated = data.updated;
                     $("#log-container").html(data.events);
-                    switchDateFormat(lastFormat);
+                    formatPingDates();
                 }
 
                 if (data.downtimes) {
@@ -103,60 +118,25 @@ $(function () {
 
                 if (document.title != data.title) {
                     document.title = data.title;
+                    var downPostfix = data.status == "down" ? "_down" : "";
+                    favicon.href = `${base}/static/img/favicon${downPostfix}.svg`;
                 }
             }
         });
     }, true);
 
-    // Copy to clipboard
-    var clipboard = new Clipboard('button.copy-btn');
-    $("button.copy-btn").mouseout(function(e) {
-        setTimeout(function() {
-            e.target.textContent = e.target.dataset.label;
-        }, 300);
-    });
-
-    clipboard.on('success', function(e) {
-        e.trigger.textContent = "Copied!";
-        e.clearSelection();
-    });
-
-    clipboard.on('error', function(e) {
-        var text = e.trigger.getAttribute("data-clipboard-text");
-        prompt("Press Ctrl+C to select:", text)
-    });
-
     $("#events").on("click", "tr.ok", function() {
-        $("#ping-details-body").text("Updating...");
-        $('#ping-details-modal').modal("show");
-
-        $.get(this.dataset.url, function(data) {
-                $("#ping-details-body").html(data);
-
-                var htmlPre = $("#email-body-html pre");
-                if (htmlPre.length) {
-                    var opts = {USE_PROFILES: {html: true}};
-                    var clean = DOMPurify.sanitize(htmlPre.text(), opts);
-                    var blob = new Blob([clean], {type: "text/html; charset=utf-8"});
-
-                    htmlPre.remove();
-                    document.getElementById("email-body-html-iframe").src = URL.createObjectURL(blob);
-                }
-            }
-        );
-
+        var n = $("td", this).first().text();
+        var tmpl = $("#log").data("url").slice(0, -2);
+        loadPingDetails(tmpl + n + "/");
         return false;
     });
 
-    var lastFormat = "local";
-    function switchDateFormat(format) {
-        lastFormat = format;
-        $("#log tr").each(function(index, row) {
-            var dt = moment(row.getAttribute("data-dt"));
-            format == "local" ? dt.local() : dt.tz(format);
-
-            $(".date", row).text(dt.format("MMM D"));
-            $(".time", row).text(dt.format("HH:mm"));
+    function formatPingDates() {
+        document.querySelectorAll("#log tr").forEach(function(row) {
+            var dt = new Date(row.dataset.dt * 1000);
+            row.children[1].textContent = dateFormatter.formatDate(dt);
+            row.children[2].textContent = dateFormatter.formatTime(dt);
         })
 
         // The table is initially hidden to avoid flickering as we convert dates.
@@ -165,11 +145,10 @@ $(function () {
     }
 
 
-    $("#format-switcher").click(function(ev) {
-        var format = ev.target.getAttribute("data-format");
-        switchDateFormat(format);
+    $("#tz-switcher").click(function(ev) {
+        dateFormatter.setTimezone(ev.target.dataset.tz);
+        formatPingDates();
     });
-
 
     var transferFormLoadStarted = false;
     $("#transfer-btn").on("mouseenter click", function() {
@@ -179,8 +158,18 @@ $(function () {
         transferFormLoadStarted = true;
         $.get(this.dataset.url, function(data) {
             $("#transfer-modal" ).html(data);
-            $("#target-project").selectpicker();
         });
+    });
+
+    $(".click-to-copy").tooltip({ container: "body", title: "Click to copy" });
+    $(".click-to-copy").click(function (e) {
+        if (window.getSelection().toString()) {
+            // do nothing, selection not empty
+            return;
+        }
+
+        navigator.clipboard.writeText(this.textContent);
+        $(".tooltip-inner").text("Copied!");
     });
 
     // Enable the submit button in transfer form when user selects
@@ -191,9 +180,15 @@ $(function () {
 
 
     // Enable/disable fields in the "Filtering Rules" modal
-    $("input[type=radio][name=filter_by_subject]").on("change", function() {
-        var enableInputs = this.value == "yes";
-        $(".filter-by-subject").prop("disabled", !enableInputs);
+    $("input.filter-toggle").on("change", function() {
+        var enableInputs = $("input.filter-toggle:checked").length > 0;
+        $(".filter-kw").prop("disabled", !enableInputs);
     });
+
+    // If the URL hash is #ping-<number>,  open the "Ping Details" dialog
+    if (document.location.hash.indexOf("#ping-") === 0) {
+        var n = parseInt(document.location.hash.substr(6));
+        loadPingDetails(`../pings/${n}/`);
+    }
 
 });

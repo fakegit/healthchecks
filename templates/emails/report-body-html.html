@@ -2,39 +2,19 @@
 {% load humanize hc_extras %}
 
 {% block content %}
-Hello,<br />
 
-{% if nag %}
-    This is a
-    {% if nag_period == 3600 %}hourly{% endif %}
-    {% if nag_period == 86400 %}daily{% endif %}
-    reminder sent by <a href="{% site_root %}">{% site_name %}</a>.<br />
-
-    {% if num_down == 1%}
-        One check is currently <strong>DOWN</strong>.
-    {% else %}
-        {{ num_down }} checks are currently <strong>DOWN</strong>.
-    {% endif %}
-
-    <br />
-    {% include "emails/summary-html.html" %}
-
-    <strong>Too many notifications?</strong>
-    Visit the <a href="{{ notifications_url }}">Email Reports</a>
-    page on {% site_name %} to set your notification preferences.
-
+{% if summary_nchecks %}
+{{ when }}, <strong>{{ summary_nchecks }} check{{ summary_nchecks|pluralize }}</strong> had <strong>{{ summary_ntimes }} downtime event{{ summary_ntimes|pluralize }}</strong>.
 {% else %}
-    This is a monthly report sent by <a href="{% site_root %}">{% site_name %}</a>.
-
-    <br />
-    {% include "emails/summary-downtimes-html.html" %}
-
-    <strong>Just one more thing to check:</strong>
-    Do you have more cron jobs,
-    not yet on this list, that would benefit from monitoring?
-    Get the ball rolling by adding one more!
+{{ when }}, no checks had downtimes. Nice!
 {% endif %}
 
+{% include "emails/report-summary-html.html" %}
+
+Just one more thing to check:
+<strong>Do you have more cron jobs or periodic processes,
+that are not yet on this list?</strong>
+Set up monitoring for them, get notified when they don't run on time!
 <br /><br />
 
 Cheers,<br>

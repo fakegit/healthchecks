@@ -1,12 +1,9 @@
-# -*- coding: utf-8 -*-
-from __future__ import unicode_literals
+from datetime import timedelta as td
 
-from django.db import models, migrations
-import datetime
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [("api", "0002_auto_20150616_0732")]
 
     operations = [
@@ -23,6 +20,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="check",
             name="timeout",
-            field=models.DurationField(default=datetime.timedelta(1)),
+            field=models.DurationField(default=td(1)),
         ),
     ]

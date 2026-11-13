@@ -10,9 +10,10 @@ over the following:
 
 * Name, tags, description
 * Schedule
+* Filtering rules
 * Assigned notification methods
 
-The newly created check has a different ping URL, and it starts with an empty log.
+The newly created check has a different ping URL and an empty event log.
 
 ## Cloning All Checks Into a New Project
 
@@ -25,7 +26,7 @@ Below is an example using Python and the [requests](https://requests.readthedocs
 ```python
 import requests
 
-API_URL = "SITE_ROOT/api/v1/checks/"
+API_URL = "SITE_ROOT/api/v3/checks/"
 SOURCE_PROJECT_READONLY_KEY = "..."
 TARGET_PROJECT_KEY = "..."
 

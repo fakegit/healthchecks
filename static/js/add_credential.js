@@ -1,12 +1,5 @@
 $(function() {
     var form = document.getElementById("add-credential-form");
-    var optionsBytes = Uint8Array.from(atob(form.dataset.options), c => c.charCodeAt(0));
-    // cbor.js expects ArrayBuffer as input when decoding
-    var options = CBOR.decode(optionsBytes.buffer);
-
-    function b64(arraybuffer) {
-        return btoa(String.fromCharCode.apply(null, new Uint8Array(arraybuffer)));
-    }
 
     function requestCredentials() {
         // Hide error & success messages, show the "waiting" message
@@ -15,10 +8,22 @@ $(function() {
         $("#error").addClass("hide");
         $("#success").addClass("hide");
 
-        navigator.credentials.create(options).then(function(attestation) {
-            $("#attestation_object").val(b64(attestation.response.attestationObject));
-            $("#client_data_json").val(b64(attestation.response.clientDataJSON));
+        var options = JSON.parse($("#options").text());
+        // Override pubKeyCredParams prepared by python-fido2,
+        // to only list ES256 (-7) and RS256 (-257), **and omit Ed25519 (-8)**.
+        // This is to work around a bug in Firefox < 119. Affected
+        // Firefox versions serialize Ed25519 keys incorrectly,
+        // the workaround is to exclude Ed25519 from pubKeyCredParams.
+        //
+        // For reference, different project, similar issue:
+        // https://github.com/MasterKale/SimpleWebAuthn/issues/463
+        options.publicKey.pubKeyCredParams= [
+            {"alg": -7, "type": "public-key"},
+            {"alg": -257, "type": "public-key"}
+        ]
 
+        webauthnJSON.create(options).then(function(response) {
+            $("#response").val(JSON.stringify(response));
             // Show the success message and save button
             $("#waiting").addClass("hide");
             $("#success").removeClass("hide");
@@ -39,5 +44,10 @@ $(function() {
 
     $("#name-next").click(requestCredentials);
     $("#retry").click(requestCredentials);
+
+    // Disable the submit button to prevent double submission
+    $("#add-credential-form").submit(function() {
+        $("#add-credential-submit").prop("disabled", true);
+    });
 
 });

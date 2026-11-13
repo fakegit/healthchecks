@@ -1,10 +1,14 @@
-from datetime import datetime as dt
-from random import randint
-from django.utils import timezone
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from django.template.defaultfilters import pluralize
+from django.utils.timezone import now
 
 
-class Unit(object):
-    def __init__(self, name, nsecs):
+class Unit:
+    def __init__(self, name: str, nsecs: int):
         self.name = name
         self.plural = name + "s"
         self.nsecs = nsecs
@@ -17,8 +21,8 @@ DAY = Unit("day", HOUR.nsecs * 24)
 WEEK = Unit("week", DAY.nsecs * 7)
 
 
-def format_duration(td):
-    remaining_seconds = int(td.total_seconds())
+def format_duration(duration: timedelta) -> str:
+    remaining_seconds = int(duration.total_seconds())
 
     result = []
 
@@ -29,17 +33,17 @@ def format_duration(td):
 
         v, remaining_seconds = divmod(remaining_seconds, unit.nsecs)
         if v == 1:
-            result.append("1 %s" % unit.name)
+            result.append(f"1 {unit.name}")
         elif v > 1:
-            result.append("%d %s" % (v, unit.plural))
+            result.append(f"{v} {unit.plural}")
 
     return " ".join(result)
 
 
-def format_hms(td):
-    total_seconds = td.total_seconds()
+def format_hms(duration: timedelta) -> str:
+    total_seconds = duration.total_seconds()
     if 0.01 <= total_seconds < 1:
-        return "%.2f sec" % total_seconds
+        return f"{total_seconds:.2f} sec"
 
     total_seconds = int(total_seconds)
     result = []
@@ -48,36 +52,63 @@ def format_hms(td):
     h, mins = divmod(mins, 60)
 
     if h:
-        result.append("%d h" % h)
+        result.append(f"{h} h")
 
     if h or mins:
-        result.append("%d min" % mins)
+        result.append(f"{mins} min")
 
-    result.append("%s sec" % secs)
+    result.append(f"{secs} sec")
 
     return " ".join(result)
 
 
-def format_approx_duration(td):
-    v = td.total_seconds()
-    for unit in (DAY, HOUR, MINUTE, SECOND):
-        if v >= unit.nsecs:
-            vv = v // unit.nsecs
-            if vv == 1:
-                return "1 %s" % unit.name
-            else:
-                return "%d %s" % (vv, unit.plural)
+def format_approx_duration(duration: timedelta) -> str:
+    total_seconds = int(duration.total_seconds())
 
-    return ""
+    mins, secs = divmod(total_seconds, 60)
+    hours, mins = divmod(mins, 60)
+    days, hours = divmod(hours, 24)
+
+    if days == 1:
+        return f"1 day {hours} h"
+
+    if days:
+        return f"{days} days {hours} h"
+
+    if hours:
+        return f"{hours} h {mins} min"
+
+    return f"{mins} min {secs} sec"
 
 
-def month_boundaries(months=2):
-    result = []
+def format_duration_for_sentence(duration: timedelta) -> str:
+    total_seconds = int(duration.total_seconds())
 
-    now = timezone.now()
-    y, m = now.year, now.month
-    for x in range(0, months):
-        result.insert(0, dt(y, m, 1, tzinfo=timezone.utc))
+    mins, secs = divmod(total_seconds, 60)
+    hours, mins = divmod(mins, 60)
+    days, hours = divmod(hours, 24)
+
+    if days:
+        return f"{days} day{pluralize(days)}, {hours} hour{pluralize(hours)}"
+
+    if hours:
+        return f"{hours} hour{pluralize(hours)}, {mins} minute{pluralize(mins)}"
+
+    if mins:
+        return f"{mins} minute{pluralize(mins)}, {secs} second{pluralize(secs)}"
+
+    return f"{secs} second{pluralize(secs)}"
+
+
+def month_boundaries(months: int, tzstr: str) -> list[datetime]:
+    """Return month start times in descending order starting from the current month."""
+    tz = ZoneInfo(tzstr)
+    result: list[datetime] = []
+
+    now_value = now().astimezone(tz)
+    y, m = now_value.year, now_value.month
+    for x in range(months):
+        result.append(datetime(y, m, 1, tzinfo=tz))
 
         m -= 1
         if m == 0:
@@ -87,20 +118,44 @@ def month_boundaries(months=2):
     return result
 
 
-def choose_next_report_date(now=None):
-    """ Calculate the target date for the next monthly report.
+def week_boundaries(weeks: int, tzstr: str) -> list[datetime]:
+    """Return week start times in descending order starting from the current week."""
+    tz = ZoneInfo(tzstr)
+    result: list[datetime] = []
 
-    Monthly reports should get sent on 1st of each month, at a random
-    time after 12PM UTC (so it's over the month boundary even in UTC-12).
+    today = now().astimezone(tz).date()
+    needle = today - timedelta(days=today.weekday())
+    for x in range(weeks):
+        result.append(datetime(needle.year, needle.month, needle.day, tzinfo=tz))
+        needle -= timedelta(days=7)
 
-    """
+    return result
 
-    if now is None:
-        now = timezone.now()
 
-    h, m, s = randint(12, 23), randint(0, 59), randint(0, 59)
+def day_boundaries(days: int, tzstr: str) -> list[datetime]:
+    """Return day start times in descending order starting from today."""
+    tz = ZoneInfo(tzstr)
+    result: list[datetime] = []
 
-    if now.month == 12:
-        return now.replace(now.year + 1, 1, 1, h, m, s)
-    else:
-        return now.replace(now.year, now.month + 1, 1, h, m, s)
+    needle = now().astimezone(tz).date()
+    for x in range(days):
+        result.append(datetime(needle.year, needle.month, needle.day, tzinfo=tz))
+        needle -= timedelta(days=1)
+
+    return result
+
+
+def seconds_in_month(d: date, tzstr: str) -> float:
+    tz = ZoneInfo(tzstr)
+    start = datetime(d.year, d.month, 1, tzinfo=tz)
+    start_utc = start.astimezone(timezone.utc)
+
+    y, m = d.year, d.month
+    m += 1
+    if m > 12:
+        y += 1
+        m = 1
+
+    end = datetime(y, m, 1, tzinfo=tz)
+    end_utc = end.astimezone(timezone.utc)
+    return (end_utc - start_utc).total_seconds()
